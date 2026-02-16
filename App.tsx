@@ -584,26 +584,43 @@ function rand(min: number, max: number) { return Math.floor(Math.random() * (max
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 function xpForLevel(lv: number) { return lv * 30; }
 
+function pickVoice(lang: string): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  const matching = voices.filter(v => v.lang.startsWith(lang));
+  // Prefer a voice explicitly marked as default for the language, then any match
+  return matching.find(v => v.default) || matching[0] || null;
+}
+
 function speakWord(word: string, language: Language) {
   try {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
+      const langTag = language === 'de' ? 'de' : 'en';
+      const fullTag = language === 'de' ? 'de-DE' : 'en-GB';
+      const voice = pickVoice(langTag);
+
       const u1 = new SpeechSynthesisUtterance(word);
-      u1.lang = language === 'de' ? 'de-DE' : 'en-GB';
-      u1.rate = 0.6;
-      u1.volume = 1;
+      u1.lang = fullTag;
+      if (voice) u1.voice = voice;
+      u1.rate = 0.9;
+      u1.pitch = 1.1;
+      u1.volume = 0.8;
       u1.onend = () => {
         setTimeout(() => {
           const u2 = new SpeechSynthesisUtterance(word);
-          u2.lang = language === 'de' ? 'de-DE' : 'en-GB';
-          u2.rate = 0.5;
-          u2.volume = 1;
+          u2.lang = fullTag;
+          if (voice) u2.voice = voice;
+          u2.rate = 0.9;
+          u2.pitch = 1.1;
+          u2.volume = 0.8;
           window.speechSynthesis.speak(u2);
-        }, 800);
+        }, 1200);
       };
       window.speechSynthesis.speak(u1);
     }
-  } catch (e) {}
+  } catch (_e) {
+    console.warn('Text-to-speech unavailable');
+  }
 }
 
 function generateMathQ(cfg: AgeConfig): { question: string; answer: number } {
