@@ -590,6 +590,13 @@ function pickVoice(lang: string): SpeechSynthesisVoice | null {
   return matching.find(v => v.default) || matching[0] || null;
 }
 
+const AGE_SPEECH: Record<AgeGroup, { rate: number; spellOnLoad: boolean; spellOnTap: boolean }> = {
+  '4-5':  { rate: 0.75, spellOnLoad: true,  spellOnTap: true },
+  '6-7':  { rate: 0.85, spellOnLoad: true,  spellOnTap: true },
+  '8-9':  { rate: 0.9,  spellOnLoad: false, spellOnTap: true },
+  '10-11': { rate: 0.95, spellOnLoad: false, spellOnTap: false },
+};
+
 function makeUtterance(text: string, fullTag: string, voice: SpeechSynthesisVoice | null, rate = 0.9): SpeechSynthesisUtterance {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = fullTag;
@@ -600,16 +607,17 @@ function makeUtterance(text: string, fullTag: string, voice: SpeechSynthesisVoic
   return u;
 }
 
-function speakWord(word: string, language: Language, spellOut = false) {
+function speakWord(word: string, language: Language, spellOut = false, age: AgeGroup = '6-7') {
   try {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
       const langTag = language === 'de' ? 'de' : 'en';
       const fullTag = language === 'de' ? 'de-DE' : 'en-GB';
       const voice = pickVoice(langTag);
+      const { rate } = AGE_SPEECH[age];
 
       // 1. Say the whole word
-      const u1 = makeUtterance(word, fullTag, voice);
+      const u1 = makeUtterance(word, fullTag, voice, rate);
       u1.onend = () => {
         if (spellOut) {
           // 2. Spell it out letter by letter
@@ -619,12 +627,12 @@ function speakWord(word: string, language: Language, spellOut = false) {
             if (i >= letters.length) {
               // 3. Say the whole word once more after spelling
               setTimeout(() => {
-                window.speechSynthesis.speak(makeUtterance(word, fullTag, voice));
+                window.speechSynthesis.speak(makeUtterance(word, fullTag, voice, rate));
               }, 600);
               return;
             }
             setTimeout(() => {
-              const letterU = makeUtterance(letters[i], fullTag, voice, 0.8);
+              const letterU = makeUtterance(letters[i], fullTag, voice, rate * 0.9);
               letterU.onend = () => { i++; speakNextLetter(); };
               window.speechSynthesis.speak(letterU);
             }, 350);
@@ -633,7 +641,7 @@ function speakWord(word: string, language: Language, spellOut = false) {
         } else {
           // Simple repeat
           setTimeout(() => {
-            window.speechSynthesis.speak(makeUtterance(word, fullTag, voice));
+            window.speechSynthesis.speak(makeUtterance(word, fullTag, voice, rate));
           }, 1200);
         }
       };
@@ -644,14 +652,27 @@ function speakWord(word: string, language: Language, spellOut = false) {
   }
 }
 
-function getSpellingHint(word: string, tries: number): string {
+function getSpellingHint(word: string, tries: number, age: AgeGroup): string {
   const len = word.length;
-  if (tries === 1) {
-    // After 1st wrong: show length + first letter
+  if (age === '10-11') return '';
+  if (age === '8-9') {
+    // Older kids: just first letter on any wrong attempt
     return word[0] + ' _ '.repeat(len - 1).trim();
   }
-  // After 2nd wrong: show first and last letter + length
+  // Ages 4-7: progressive hints
+  if (tries === 1) {
+    if (age === '4-5' && len > 2) {
+      // Youngest: show first two letters
+      return word[0] + ' ' + word[1] + ' _ '.repeat(len - 2).trim();
+    }
+    return word[0] + ' _ '.repeat(len - 1).trim();
+  }
+  // 2nd wrong attempt
   if (len <= 2) return word;
+  if (age === '4-5') {
+    // Youngest: show first two + last letter
+    return word[0] + ' ' + word[1] + ' _ '.repeat(Math.max(0, len - 3)).trim() + ' ' + word[len - 1];
+  }
   return word[0] + ' _ '.repeat(len - 2).trim() + ' ' + word[len - 1];
 }
 
@@ -884,7 +905,8 @@ export default function App() {
       const words = SPELLING_WORDS[lang][profile.age];
       const word = pick(words);
       setSpellingWord(word);
-      setTimeout(() => speakWord(word, lang, true), 400);
+      const shouldSpell = AGE_SPEECH[profile.age].spellOnLoad;
+      setTimeout(() => speakWord(word, lang, shouldSpell, profile.age), 400);
     } else {
       const qs = SCIENCE_QUESTIONS[lang][profile.age];
       setScienceQ(pick(qs));
@@ -928,9 +950,10 @@ export default function App() {
       } else {
         // Still have tries left — show progressive hint for spelling
         setFeedback(pick(WRONG_MSGS[lang]));
-        if (missionType === 'spelling') {
-          setShowFact(getSpellingHint(spellingWord, newTries));
-          speakWord(spellingWord, lang, true);
+        if (missionType === 'spelling' && profile) {
+          const hint = getSpellingHint(spellingWord, newTries, profile.age);
+          setShowFact(hint);
+          speakWord(spellingWord, lang, AGE_SPEECH[profile.age].spellOnTap, profile.age);
         } else {
           setShowFact('');
         }
@@ -1542,22 +1565,31 @@ export default function App() {
               <Text style={styles.questionLabel}>{t('spellWord')}</Text>
               <TouchableOpacity
                 style={{ backgroundColor: COLORS.accent, width: 110, height: 110, borderRadius: 55, alignItems: 'center', justifyContent: 'center', marginBottom: 8, shadowColor: COLORS.accentLight, shadowRadius: 20, shadowOpacity: 0.6 }}
-                onPress={() => speakWord(spellingWord, lang, true)}
+                onPress={() => profile && speakWord(spellingWord, lang, AGE_SPEECH[profile.age].spellOnTap, profile.age)}
               >
                 <Text style={{ fontSize: 50 }}>🔊</Text>
               </TouchableOpacity>
               <Text style={{ color: COLORS.textDim, fontSize: 13, marginBottom: 4 }}>
-                {lang === 'de' ? 'Tippe zum Anhören und Buchstabieren' : 'Tap to hear & spell out'}
+                {profile && AGE_SPEECH[profile.age].spellOnTap
+                  ? (lang === 'de' ? 'Tippe zum Anhören und Buchstabieren' : 'Tap to hear & spell out')
+                  : (lang === 'de' ? 'Tippe zum Anhören' : 'Tap to hear again')}
               </Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 12, gap: 4 }}>
-                {spellingWord.split('').map((_, i) => (
-                  <View key={i} style={{ width: 22, height: 26, borderRadius: 4, backgroundColor: userAnswer.length > i ? COLORS.accent : COLORS.cardBg, borderWidth: 1, borderColor: COLORS.accent, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ color: COLORS.text, fontSize: 14, fontWeight: 'bold' }}>
-                      {userAnswer.length > i ? userAnswer[i] : ''}
-                    </Text>
-                  </View>
-                ))}
-              </View>
+              {profile && (profile.age === '4-5' || profile.age === '6-7') && (
+                <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 12, gap: 4, flexWrap: 'wrap' }}>
+                  {spellingWord.split('').map((_, i) => (
+                    <View key={i} style={{ width: 28, height: 32, borderRadius: 6, backgroundColor: userAnswer.length > i ? COLORS.accent : COLORS.cardBg, borderWidth: 1.5, borderColor: COLORS.accent, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ color: COLORS.text, fontSize: 16, fontWeight: 'bold' }}>
+                        {userAnswer.length > i ? userAnswer[i] : ''}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {profile && profile.age === '8-9' && (
+                <Text style={{ color: COLORS.textDim, fontSize: 13, marginBottom: 8 }}>
+                  {lang === 'de' ? `${spellingWord.length} Buchstaben` : `${spellingWord.length} letters`}
+                </Text>
+              )}
               <TextInput
                 style={styles.answerInput}
                 value={userAnswer}
