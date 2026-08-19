@@ -1,6 +1,6 @@
 include:
 - project: 'harnessthespark/ci-templates'
-  ref: 'main'
+  ref: v1
   file: 'templates/coolify-deploy.yml'
 trigger_production_build:
   extends: .coolify_deployment_engine
